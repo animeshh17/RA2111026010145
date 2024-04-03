@@ -1,51 +1,43 @@
-from fastapi import FastAPI, Query
+from typing import List
+from fastapi import FastAPI, HTTPException
 import requests
+from collections import deque
 
 app = FastAPI()
 
 
-BASE_URL = "http://20.244.56.144/test/companies"
+WINDOW_SIZE = 10
+TEST_SERVER_URL = "http://20.244.56.144/test/rand" # test diffrent api endpoints
 
-COMPANIES = ["AMZ", "FLP", "SNP", "WYN", "AZO"]
-CATEGORIES = ["Phone", "Computer", "TV", "Earphone", "Tablet", "Charger", "Mouse", "Keypad", "Bluetooth", 
-              "Pendrive", "Remote", "Speaker", "Headset", "Laptop", "PC"]
 
-@app.get("/categories/{category_name}/products")
-async def get_top_products(category_name: str, n: int = Query(10, gt=0, le=10), 
-                           min_price: int = 1, max_price: int = 10000, 
-                           page: int = 1, sort_by: str = None, order: str = None):
-    
-    category_name = category_name.capitalize()
-    if category_name not in CATEGORIES:
-        return {"error": "Invalid category name"}
-    
-    url = f"{BASE_URL}/{category_name}/products"
-    params = {"top": n, "minPrice": min_price, "maxPrice": max_price}
-    if page > 1:
-        params["page"] = page
-    if sort_by and order:
-        params[sort_by] = order
-        
-    response = requests.get(url, params=params)
-    data = response.json()
-    
-    for i, product in enumerate(data):
-        product["productId"] = f"{category_name.lower()}-{i+1}"
-    
-    return data
+number_window = deque()
 
-@app.get("/categories/{category_name}/products/{product_id}")
-async def get_product_details(category_name: str, product_id: str):
-    category_name = category_name.capitalize()
-    if category_name not in CATEGORIES:
-        return {"error": "Invalid category name"}
-    
-    url = f"{BASE_URL}/{category_name}/products"
-    response = requests.get(url)
-    data = response.json()
-    product = next((p for p in data if p["productId"] == product_id), None)
-    
-    if product:
-        return product
-    else:
-        return {"error": "Product not found"}
+@app.get("/numbers/{number_id}", response_model=dict)
+async def get_numbers(number_id: str):
+    try:
+
+        response = requests.get(TEST_SERVER_URL.format(number_id=number_id))
+        response.raise_for_status()
+        numbers = response.json()
+    except (requests.exceptions.RequestException, ValueError):
+        raise HTTPException(status_code=503, detail="Failed to fetch numbers from the test server.")
+
+
+    for number in numbers:
+        if number not in number_window:
+            number_window.append(number)
+            if len(number_window) > WINDOW_SIZE:
+                number_window.popleft()
+
+
+    avg = sum(number_window) / len(number_window) if number_window else 0
+
+
+    response_data = {
+        "numbers": numbers,
+        "windowPrevState": list(number_window)[:-len(numbers)],
+        "windowCurrState": list(number_window),
+        "avg": avg
+    }
+
+    return response_data
